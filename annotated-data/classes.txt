@@ -1,0 +1,21 @@
+Airplane
+Car
+book
+bottle
+chair
+charger
+clock
+cloth
+copier
+electrical socket
+fan
+keyboard
+marker
+monitor
+mouse
+spray bottle
+stapler
+switch
+telephone
+trashcan
+whiteboard eraser

@@ -1,0 +1,93 @@
+{
+  "categories": [
+    {
+      "id": 0,
+      "name": "Airplane"
+    },
+    {
+      "id": 1,
+      "name": "Car"
+    },
+    {
+      "id": 2,
+      "name": "book"
+    },
+    {
+      "id": 3,
+      "name": "bottle"
+    },
+    {
+      "id": 4,
+      "name": "chair"
+    },
+    {
+      "id": 5,
+      "name": "charger"
+    },
+    {
+      "id": 6,
+      "name": "clock"
+    },
+    {
+      "id": 7,
+      "name": "cloth"
+    },
+    {
+      "id": 8,
+      "name": "copier"
+    },
+    {
+      "id": 9,
+      "name": "electrical socket"
+    },
+    {
+      "id": 10,
+      "name": "fan"
+    },
+    {
+      "id": 11,
+      "name": "keyboard"
+    },
+    {
+      "id": 12,
+      "name": "marker"
+    },
+    {
+      "id": 13,
+      "name": "monitor"
+    },
+    {
+      "id": 14,
+      "name": "mouse"
+    },
+    {
+      "id": 15,
+      "name": "spray bottle"
+    },
+    {
+      "id": 16,
+      "name": "stapler"
+    },
+    {
+      "id": 17,
+      "name": "switch"
+    },
+    {
+      "id": 18,
+      "name": "telephone"
+    },
+    {
+      "id": 19,
+      "name": "trashcan"
+    },
+    {
+      "id": 20,
+      "name": "whiteboard eraser"
+    }
+  ],
+  "info": {
+    "year": 2026,
+    "version": "1.0",
+    "contributor": "Label Studio"
+  }
+}
