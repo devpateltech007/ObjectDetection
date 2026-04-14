@@ -34,6 +34,7 @@ YOLO_WEIGHTS_PATH = PROJECT_ROOT / "yolov8n.pt"
 ANNOTATED_DATA_DIR = PROJECT_ROOT / "annotated-data"
 ANNOTATED_IMAGES_DIR = ANNOTATED_DATA_DIR / "images"
 ANNOTATED_LABELS_DIR = ANNOTATED_DATA_DIR / "labels"
+ANNOTATED_VIDEO_LABELS_DIR = ANNOTATED_DATA_DIR / "video_annotations"
 ANNOTATED_CLASSES_FILE = ANNOTATED_DATA_DIR / "classes.txt"
 
 _MODEL_CACHE: Dict[str, Any] = {}
@@ -187,6 +188,83 @@ def _load_annotated_ground_truth(image_path: Path, source_filename: str | None =
         )
 
     return gt_items if gt_items else None
+
+
+def _load_video_ground_truth(video_path: Path, source_filename: str | None = None) -> Dict[int, List[Dict[str, Any]]] | None:
+    # Ensure absolute paths with explicit resolution
+    video_labels_dir = ANNOTATED_VIDEO_LABELS_DIR.resolve()
+    
+    # Check if parent annotated-data dir exists first (like image loader does)
+    if not ANNOTATED_DATA_DIR.resolve().exists():
+        return None
+    
+    # Create video_annotations dir if it doesn't exist yet
+    video_labels_dir.mkdir(parents=True, exist_ok=True)
+    
+    lookup_stem = Path(source_filename).stem if source_filename else video_path.stem
+    annotation_file = video_labels_dir / f"{lookup_stem}.json"
+    
+    # If file doesn't exist, return None (no ground truth)
+    if not annotation_file.exists():
+        return None
+
+    try:
+        payload = json.loads(annotation_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, FileNotFoundError):
+        return None
+
+    # Get actual video dimensions to scale GT bboxes if needed
+    cap = cv2.VideoCapture(str(video_path))
+    actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    
+    # Get GT metadata dimensions (what the annotations were created for)
+    gt_width = payload.get("frame_width", 1280)
+    gt_height = payload.get("frame_height", 720)
+    
+    # Calculate scaling factors if resolution mismatch
+    scale_x = actual_width / gt_width if gt_width > 0 else 1.0
+    scale_y = actual_height / gt_height if gt_height > 0 else 1.0
+
+    frame_gt: Dict[int, List[Dict[str, Any]]] = {}
+    for frame_entry in payload.get("frames", []):
+        try:
+            frame_index = int(frame_entry.get("frame_index"))
+        except Exception:
+            continue
+
+        objects: List[Dict[str, Any]] = []
+        for obj in frame_entry.get("objects", []):
+            label = str(obj.get("label", "unknown"))
+            bbox = obj.get("bbox", [])
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                continue
+            try:
+                x1, y1, x2, y2 = [float(v) for v in bbox]
+            except Exception:
+                continue
+            
+            # Scale bbox if video resolution differs from GT metadata
+            if scale_x != 1.0 or scale_y != 1.0:
+                x1, x2 = x1 * scale_x, x2 * scale_x
+                y1, y2 = y1 * scale_y, y2 * scale_y
+
+            # Keep GT boxes within actual frame bounds after scaling.
+            if actual_width > 0 and actual_height > 0:
+                x1 = max(0.0, min(x1, float(actual_width - 1)))
+                x2 = max(0.0, min(x2, float(actual_width - 1)))
+                y1 = max(0.0, min(y1, float(actual_height - 1)))
+                y2 = max(0.0, min(y2, float(actual_height - 1)))
+            
+            if x2 <= x1 or y2 <= y1:
+                continue
+            objects.append({"label": label, "bbox": [x1, y1, x2, y2]})
+
+        if objects:
+            frame_gt[frame_index] = objects
+
+    return frame_gt if frame_gt else None
 
 
 def _resolve_image_path(raw_path: str) -> Path:
@@ -370,6 +448,8 @@ def _run_video_inference_pipeline(
     model_name: Literal["yolov8n", "rf-detr"],
     sample_rate: int = 15,
     max_frames: int = 20,
+    iou_threshold: float = 0.4,
+    source_filename: str | None = None,
 ) -> Dict[str, Any]:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -381,6 +461,8 @@ def _run_video_inference_pipeline(
     processed = 0
     latency_values: List[float] = []
     frame_results: List[Dict[str, Any]] = []
+    frame_metrics: List[Dict[str, Any]] = []
+    video_ground_truth = _load_video_ground_truth(video_path, source_filename=source_filename)
 
     sample_rate = max(1, int(sample_rate))
     max_frames = max(1, int(max_frames))
@@ -400,6 +482,14 @@ def _run_video_inference_pipeline(
             else:
                 detections, speed = run_with_latency(lambda: _infer_rf_detr_frame(frame))
 
+            frame_ground_truth = video_ground_truth.get(frame_index) if video_ground_truth else None
+            evaluation = evaluate_detection_metrics(
+                predictions=detections,
+                ground_truth=frame_ground_truth,
+                iou_threshold=iou_threshold,
+            )
+            frame_metrics.append(evaluation)
+
             latency_values.append(float(speed.get("latency_ms", 0.0)))
             rendered = _draw_detections_on_frame(frame, detections)
             encoded_image = _encode_frame_to_base64_jpeg(rendered)
@@ -413,6 +503,7 @@ def _run_video_inference_pipeline(
                     "fps": speed.get("fps", 0.0),
                     "num_detections": len(detections),
                     "detections": detections,
+                    "evaluation": evaluation,
                     "preview_image_base64": encoded_image,
                 }
             )
@@ -422,6 +513,12 @@ def _run_video_inference_pipeline(
 
     avg_latency = sum(latency_values) / len(latency_values) if latency_values else 0.0
     avg_fps = 1000.0 / avg_latency if avg_latency > 0 else 0.0
+    avg_accuracy = None
+    avg_map50 = None
+    valid_metrics = [metric for metric in frame_metrics if metric.get("accuracy") is not None]
+    if valid_metrics:
+        avg_accuracy = round(sum(float(metric["accuracy"]) for metric in valid_metrics) / len(valid_metrics), 4)
+        avg_map50 = round(sum(float(metric["map50"]) for metric in valid_metrics) / len(valid_metrics), 4)
 
     return {
         "model_name": model_name,
@@ -432,6 +529,12 @@ def _run_video_inference_pipeline(
         "processed_frames": processed,
         "avg_latency_ms": round(avg_latency, 3),
         "avg_fps": round(avg_fps, 3),
+        "evaluation": {
+            "accuracy": avg_accuracy,
+            "map50": avg_map50,
+            "note": "Averaged across sampled frames using video annotations when available.",
+            "iou_threshold": iou_threshold,
+        },
         "frames": frame_results,
     }
 
@@ -487,6 +590,7 @@ async def infer_video_upload(
     model_name: Literal["yolov8n", "rf-detr"] = Form(...),
     sample_rate: int = Form(default=15),
     max_frames: int = Form(default=20),
+    iou_threshold: float = Form(default=0.4),
 ) -> Dict[str, Any]:
     suffix = Path(file.filename or "upload.mp4").suffix or ".mp4"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
@@ -495,11 +599,14 @@ async def infer_video_upload(
         temp_path = Path(temp_file.name)
 
     try:
+        iou_threshold = min(1.0, max(0.0, float(iou_threshold)))
         return _run_video_inference_pipeline(
             video_path=temp_path,
             model_name=model_name,
             sample_rate=sample_rate,
             max_frames=max_frames,
+            iou_threshold=iou_threshold,
+            source_filename=file.filename,
         )
     finally:
         temp_path.unlink(missing_ok=True)

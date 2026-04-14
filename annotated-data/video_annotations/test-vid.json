@@ -1,0 +1,229 @@
+{
+  "video_name": "test-vid.mp4",
+  "frame_width": 1280,
+  "frame_height": 720,
+  "frames": [
+    {
+      "frame_index": 0,
+      "timestamp_sec": 0.0,
+      "objects": [
+        {
+          "label": "keyboard",
+          "bbox": [
+            350,
+            120,
+            1200,
+            420
+          ]
+        },
+        {
+          "label": "mouse",
+          "bbox": [
+            250,
+            500,
+            400,
+            650
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 15,
+      "timestamp_sec": 0.5,
+      "objects": [
+        {
+          "label": "keyboard",
+          "bbox": [
+            360,
+            130,
+            1210,
+            430
+          ]
+        },
+        {
+          "label": "mouse",
+          "bbox": [
+            260,
+            510,
+            410,
+            660
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 30,
+      "timestamp_sec": 1.0,
+      "objects": [
+        {
+          "label": "keyboard",
+          "bbox": [
+            360,
+            130,
+            1210,
+            430
+          ]
+        },
+        {
+          "label": "mouse",
+          "bbox": [
+            260,
+            510,
+            410,
+            660
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 45,
+      "timestamp_sec": 1.5,
+      "objects": [
+        {
+          "label": "bottle",
+          "bbox": [
+            450,
+            150,
+            650,
+            600
+          ]
+        },
+        {
+          "label": "book",
+          "bbox": [
+            400,
+            600,
+            700,
+            750
+          ]
+        },
+        {
+          "label": "mouse",
+          "bbox": [
+            800,
+            550,
+            950,
+            700
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 60,
+      "timestamp_sec": 2.0,
+      "objects": [
+        {
+          "label": "bottle",
+          "bbox": [
+            460,
+            160,
+            660,
+            610
+          ]
+        },
+        {
+          "label": "book",
+          "bbox": [
+            420,
+            610,
+            720,
+            760
+          ]
+        },
+        {
+          "label": "mouse",
+          "bbox": [
+            820,
+            560,
+            970,
+            710
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 75,
+      "timestamp_sec": 2.5,
+      "objects": [
+        {
+          "label": "bottle",
+          "bbox": [
+            470,
+            170,
+            670,
+            620
+          ]
+        },
+        {
+          "label": "book",
+          "bbox": [
+            430,
+            620,
+            730,
+            770
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 90,
+      "timestamp_sec": 3.0,
+      "objects": [
+        {
+          "label": "chair",
+          "bbox": [
+            50,
+            400,
+            700,
+            1000
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 105,
+      "timestamp_sec": 3.5,
+      "objects": [
+        {
+          "label": "chair",
+          "bbox": [
+            40,
+            350,
+            1200,
+            1100
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 120,
+      "timestamp_sec": 4.0,
+      "objects": [
+        {
+          "label": "chair",
+          "bbox": [
+            30,
+            300,
+            1250,
+            1150
+          ]
+        }
+      ]
+    },
+    {
+      "frame_index": 135,
+      "timestamp_sec": 4.5,
+      "objects": [
+        {
+          "label": "chair",
+          "bbox": [
+            30,
+            300,
+            1250,
+            1150
+          ]
+        }
+      ]
+    }
+  ]
+}

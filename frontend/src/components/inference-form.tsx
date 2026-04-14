@@ -231,7 +231,7 @@ export function InferenceForm() {
                     onChange={() => setModelName("yolov8n")}
                   />
                   <Label htmlFor="yolov8n" className="font-normal cursor-pointer">
-                    YOLOv8n (Nano - Fast)
+                    YOLOv8n
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -241,7 +241,7 @@ export function InferenceForm() {
                     onChange={() => setModelName("rf-detr")}
                   />
                   <Label htmlFor="rf-detr" className="font-normal cursor-pointer">
-                    RF-DETR (High Accuracy)
+                    RF-DETR
                   </Label>
                 </div>
               </div>
