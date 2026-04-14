@@ -7,30 +7,6 @@ This project implements an object detection system for image and video inference
 - Two acceleration methods: OpenVINO and ONNX Runtime CUDA
 - Evaluation using custom annotations and metrics (accuracy, mAP50, precision, recall, F1)
 
-## Assignment Requirement Coverage
-
-1. Perform object detection on video using at least two strong models
-- Implemented with YOLOv8n and RF-DETR in the video pipeline.
-
-2. FastAPI backend for image and video detection service
-- Implemented with upload endpoints for image and video.
-
-3. Frontend app for upload, inference call, and result visualization
-- Implemented with Next.js React app.
-- Visualizes detections, bounding boxes, latency, FPS, and quality metrics.
-
-4. Apply at least two acceleration methods
-- OpenVINO and ONNX Runtime CUDA integrated.
-- Acceleration is implemented for image and video benchmarking.
-
-5. Evaluate accuracy and speed
-- Accuracy and mAP50 are computed from custom annotations.
-- Speed and latency are reported for baseline and accelerated engines.
-
-6. Use your own annotated data
-- Custom image labels in annotated-data/labels and annotated-data/images.
-- Custom video annotations in annotated-data/video_annotations/test-vid.json.
-
 ## Project Structure
 
 - backend/
