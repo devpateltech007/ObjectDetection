@@ -12,10 +12,10 @@ from pydantic import BaseModel, Field
 from ultralytics import YOLO
 
 try:
-    from .acceleration import run_accelerated_inference
+    from .acceleration import run_accelerated_frame_inference, run_accelerated_inference
     from .evaluation import evaluate_detection_metrics, run_with_latency
 except ImportError:
-    from acceleration import run_accelerated_inference
+    from acceleration import run_accelerated_frame_inference, run_accelerated_inference
     from evaluation import evaluate_detection_metrics, run_with_latency
 
 app = FastAPI(title="Model Inference API")
@@ -462,6 +462,7 @@ def _run_video_inference_pipeline(
     latency_values: List[float] = []
     frame_results: List[Dict[str, Any]] = []
     frame_metrics: List[Dict[str, Any]] = []
+    acceleration_rollup: Dict[str, Dict[str, Any]] = {}
     video_ground_truth = _load_video_ground_truth(video_path, source_filename=source_filename)
 
     sample_rate = max(1, int(sample_rate))
@@ -490,6 +491,63 @@ def _run_video_inference_pipeline(
             )
             frame_metrics.append(evaluation)
 
+            accelerated_results = run_accelerated_frame_inference(
+                frame_bgr=frame,
+                model_name=model_name,
+                yolo_weights_path=YOLO_WEIGHTS_PATH,
+            )
+            for result in accelerated_results:
+                if result.get("available"):
+                    result["evaluation"] = evaluate_detection_metrics(
+                        predictions=result.get("detections", []),
+                        ground_truth=frame_ground_truth,
+                        iou_threshold=iou_threshold,
+                    )
+                else:
+                    result["evaluation"] = {
+                        "accuracy": None,
+                        "map50": None,
+                        "precision": None,
+                        "recall": None,
+                        "f1": None,
+                        "tp": 0,
+                        "fp": 0,
+                        "fn": 0,
+                        "note": "Evaluation skipped because this acceleration engine is unavailable.",
+                    }
+
+                engine = str(result.get("engine", "unknown"))
+                if engine not in acceleration_rollup:
+                    acceleration_rollup[engine] = {
+                        "engine": engine,
+                        "available": False,
+                        "frames_evaluated": 0,
+                        "latency_values": [],
+                        "fps_values": [],
+                        "accuracy_values": [],
+                        "map50_values": [],
+                    }
+
+                bucket = acceleration_rollup[engine]
+                bucket["frames_evaluated"] += 1
+                if result.get("available"):
+                    bucket["available"] = True
+                    speed = result.get("speed") or {}
+                    latency = speed.get("latency_ms")
+                    fps_val = speed.get("fps")
+                    if isinstance(latency, (int, float)):
+                        bucket["latency_values"].append(float(latency))
+                    if isinstance(fps_val, (int, float)):
+                        bucket["fps_values"].append(float(fps_val))
+
+                    acc_eval = result.get("evaluation") or {}
+                    acc_accuracy = acc_eval.get("accuracy")
+                    acc_map50 = acc_eval.get("map50")
+                    if isinstance(acc_accuracy, (int, float)):
+                        bucket["accuracy_values"].append(float(acc_accuracy))
+                    if isinstance(acc_map50, (int, float)):
+                        bucket["map50_values"].append(float(acc_map50))
+
             latency_values.append(float(speed.get("latency_ms", 0.0)))
             rendered = _draw_detections_on_frame(frame, detections)
             encoded_image = _encode_frame_to_base64_jpeg(rendered)
@@ -504,6 +562,7 @@ def _run_video_inference_pipeline(
                     "num_detections": len(detections),
                     "detections": detections,
                     "evaluation": evaluation,
+                    "acceleration": accelerated_results,
                     "preview_image_base64": encoded_image,
                 }
             )
@@ -520,6 +579,27 @@ def _run_video_inference_pipeline(
         avg_accuracy = round(sum(float(metric["accuracy"]) for metric in valid_metrics) / len(valid_metrics), 4)
         avg_map50 = round(sum(float(metric["map50"]) for metric in valid_metrics) / len(valid_metrics), 4)
 
+    acceleration_summary: List[Dict[str, Any]] = []
+    for engine, bucket in acceleration_rollup.items():
+        latency_list = bucket["latency_values"]
+        fps_list = bucket["fps_values"]
+        acc_list = bucket["accuracy_values"]
+        map_list = bucket["map50_values"]
+        acceleration_summary.append(
+            {
+                "engine": engine,
+                "available": bool(bucket["available"]),
+                "frames_evaluated": int(bucket["frames_evaluated"]),
+                "avg_latency_ms": round(sum(latency_list) / len(latency_list), 3) if latency_list else None,
+                "avg_fps": round(sum(fps_list) / len(fps_list), 3) if fps_list else None,
+                "evaluation": {
+                    "accuracy": round(sum(acc_list) / len(acc_list), 4) if acc_list else None,
+                    "map50": round(sum(map_list) / len(map_list), 4) if map_list else None,
+                    "iou_threshold": iou_threshold,
+                },
+            }
+        )
+
     return {
         "model_name": model_name,
         "video_path": str(video_path),
@@ -535,6 +615,7 @@ def _run_video_inference_pipeline(
             "note": "Averaged across sampled frames using video annotations when available.",
             "iou_threshold": iou_threshold,
         },
+        "acceleration_summary": acceleration_summary,
         "frames": frame_results,
     }
 

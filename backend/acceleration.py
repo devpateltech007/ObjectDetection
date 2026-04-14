@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+import tempfile
 from typing import Any, Dict, List, Optional
 
+import cv2
 from ultralytics import YOLO
 
 try:
@@ -369,3 +371,37 @@ def run_accelerated_inference(image_path: Path, model_name: str, yolo_weights_pa
 			"speed": None,
 		},
 	]
+
+
+def run_accelerated_frame_inference(frame_bgr: Any, model_name: str, yolo_weights_path: Path) -> List[Dict[str, Any]]:
+	"""Run acceleration paths for a video frame by reusing image acceleration pipeline."""
+	with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+		temp_path = Path(temp_file.name)
+
+	try:
+		ok = cv2.imwrite(str(temp_path), frame_bgr)
+		if not ok:
+			return [
+				{
+					"engine": "openvino",
+					"available": False,
+					"error": "Failed to serialize frame for accelerated inference.",
+					"detections": [],
+					"speed": None,
+				},
+				{
+					"engine": "onnxruntime-cuda",
+					"available": False,
+					"error": "Failed to serialize frame for accelerated inference.",
+					"detections": [],
+					"speed": None,
+				},
+			]
+
+		return run_accelerated_inference(
+			image_path=temp_path,
+			model_name=model_name,
+			yolo_weights_path=yolo_weights_path,
+		)
+	finally:
+		temp_path.unlink(missing_ok=True)
