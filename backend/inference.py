@@ -1,8 +1,10 @@
 from pathlib import Path
+import base64
 import json
 import tempfile
 from typing import Any, Dict, List, Literal
 
+import cv2
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
@@ -299,6 +301,141 @@ def _infer_rf_detr(image_path: Path) -> List[Dict[str, Any]]:
     return normalized
 
 
+def _infer_yolov8n_frame(frame_bgr: Any) -> List[Dict[str, Any]]:
+    model = _get_yolov8n_model()
+    results = model.predict(source=frame_bgr, verbose=False)
+
+    detections: List[Dict[str, Any]] = []
+    for result in results:
+        names = result.names
+        for box in result.boxes:
+            cls_id = int(box.cls.item())
+            conf = float(box.conf.item())
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            detections.append(
+                {
+                    "label": names[cls_id],
+                    "confidence": conf,
+                    "bbox": [x1, y1, x2, y2],
+                }
+            )
+    return detections
+
+
+def _infer_rf_detr_frame(frame_bgr: Any) -> List[Dict[str, Any]]:
+    # Keep RF-DETR frame path consistent with image-path inference path.
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+        temp_path = Path(temp_file.name)
+    try:
+        ok = cv2.imwrite(str(temp_path), frame_bgr)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to write temporary frame for RF-DETR")
+        return _infer_rf_detr(temp_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _draw_detections_on_frame(frame_bgr: Any, detections: List[Dict[str, Any]]) -> Any:
+    canvas = frame_bgr.copy()
+    for det in detections:
+        try:
+            x1, y1, x2, y2 = [int(v) for v in det.get("bbox", [])]
+        except Exception:
+            continue
+        label = det.get("label", "unknown")
+        conf = float(det.get("confidence", 0.0))
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), (50, 220, 50), 2)
+        cv2.putText(
+            canvas,
+            f"{label} {conf:.2f}",
+            (x1, max(20, y1 - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (50, 220, 50),
+            2,
+            cv2.LINE_AA,
+        )
+    return canvas
+
+
+def _encode_frame_to_base64_jpeg(frame_bgr: Any) -> str:
+    ok, encoded = cv2.imencode(".jpg", frame_bgr)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to encode frame preview")
+    return base64.b64encode(encoded.tobytes()).decode("utf-8")
+
+
+def _run_video_inference_pipeline(
+    video_path: Path,
+    model_name: Literal["yolov8n", "rf-detr"],
+    sample_rate: int = 15,
+    max_frames: int = 20,
+) -> Dict[str, Any]:
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise HTTPException(status_code=400, detail=f"Could not open video: {video_path}")
+
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    frame_index = -1
+    processed = 0
+    latency_values: List[float] = []
+    frame_results: List[Dict[str, Any]] = []
+
+    sample_rate = max(1, int(sample_rate))
+    max_frames = max(1, int(max_frames))
+
+    try:
+        while processed < max_frames:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            frame_index += 1
+
+            if frame_index % sample_rate != 0:
+                continue
+
+            if model_name == "yolov8n":
+                detections, speed = run_with_latency(lambda: _infer_yolov8n_frame(frame))
+            else:
+                detections, speed = run_with_latency(lambda: _infer_rf_detr_frame(frame))
+
+            latency_values.append(float(speed.get("latency_ms", 0.0)))
+            rendered = _draw_detections_on_frame(frame, detections)
+            encoded_image = _encode_frame_to_base64_jpeg(rendered)
+
+            timestamp_sec = float(frame_index / src_fps) if src_fps > 0 else 0.0
+            frame_results.append(
+                {
+                    "frame_index": frame_index,
+                    "timestamp_sec": round(timestamp_sec, 3),
+                    "latency_ms": speed.get("latency_ms", 0.0),
+                    "fps": speed.get("fps", 0.0),
+                    "num_detections": len(detections),
+                    "detections": detections,
+                    "preview_image_base64": encoded_image,
+                }
+            )
+            processed += 1
+    finally:
+        cap.release()
+
+    avg_latency = sum(latency_values) / len(latency_values) if latency_values else 0.0
+    avg_fps = 1000.0 / avg_latency if avg_latency > 0 else 0.0
+
+    return {
+        "model_name": model_name,
+        "video_path": str(video_path),
+        "video_fps": round(float(src_fps), 3),
+        "video_total_frames": total_frames,
+        "sample_rate": sample_rate,
+        "processed_frames": processed,
+        "avg_latency_ms": round(avg_latency, 3),
+        "avg_fps": round(avg_fps, 3),
+        "frames": frame_results,
+    }
+
+
 @app.post("/infer")
 def infer(payload: InferenceRequest) -> Dict[str, Any]:
     image_path = _resolve_image_path(payload.image_path)
@@ -339,6 +476,30 @@ async def infer_upload(
             model_name=model_name,
             ground_truth=parsed_ground_truth,
             source_filename=file.filename,
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+@app.post("/infer-video-upload")
+async def infer_video_upload(
+    file: UploadFile = File(...),
+    model_name: Literal["yolov8n", "rf-detr"] = Form(...),
+    sample_rate: int = Form(default=15),
+    max_frames: int = Form(default=20),
+) -> Dict[str, Any]:
+    suffix = Path(file.filename or "upload.mp4").suffix or ".mp4"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+        content = await file.read()
+        temp_file.write(content)
+        temp_path = Path(temp_file.name)
+
+    try:
+        return _run_video_inference_pipeline(
+            video_path=temp_path,
+            model_name=model_name,
+            sample_rate=sample_rate,
+            max_frames=max_frames,
         )
     finally:
         temp_path.unlink(missing_ok=True)

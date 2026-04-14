@@ -6,8 +6,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { runInferenceUpload, type InferenceResponse, type GroundTruthBox } from "@/lib/api"
+import {
+  runInferenceUpload,
+  runVideoInferenceUpload,
+  type InferenceResponse,
+  type GroundTruthBox,
+  type VideoInferenceResponse,
+} from "@/lib/api"
 import { InferenceResults } from "./inference-results"
+import { VideoInferenceResults } from "./video-inference-results"
 import { Loader2 } from "lucide-react"
 
 interface GroundTruthDraft {
@@ -30,9 +37,11 @@ export function InferenceForm() {
   const [lastRunImagePreviewUrl, setLastRunImagePreviewUrl] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [results, setResults] = useState<InferenceResponse | null>(null)
+  const [videoResults, setVideoResults] = useState<VideoInferenceResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // Revoke only on component unmount; revoking on every state change can break images in use.
     return () => {
       if (selectedFilePreviewUrl) {
         URL.revokeObjectURL(selectedFilePreviewUrl)
@@ -41,7 +50,7 @@ export function InferenceForm() {
         URL.revokeObjectURL(lastRunImagePreviewUrl)
       }
     }
-  }, [selectedFilePreviewUrl, lastRunImagePreviewUrl])
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -56,7 +65,9 @@ export function InferenceForm() {
 
     try {
       let groundTruth: GroundTruthBox[] | undefined
-      if (includeGroundTruth) {
+      const isVideo = selectedFile.type.startsWith("video/")
+
+      if (includeGroundTruth && !isVideo) {
         const parsed = groundTruthItems
           .filter((item) => item.label.trim().length > 0)
           .map((item) => {
@@ -83,10 +94,23 @@ export function InferenceForm() {
         groundTruth = parsed
       }
 
-      const response = await runInferenceUpload(selectedFile, modelName, groundTruth)
-
-      setLastRunImagePreviewUrl(selectedFilePreviewUrl)
-      setResults(response)
+      if (isVideo) {
+        const response = await runVideoInferenceUpload(selectedFile, modelName)
+        if (lastRunImagePreviewUrl) {
+          URL.revokeObjectURL(lastRunImagePreviewUrl)
+        }
+        setVideoResults(response)
+        setResults(null)
+        setLastRunImagePreviewUrl(null)
+      } else {
+        if (lastRunImagePreviewUrl && lastRunImagePreviewUrl !== selectedFilePreviewUrl) {
+          URL.revokeObjectURL(lastRunImagePreviewUrl)
+        }
+        const response = await runInferenceUpload(selectedFile, modelName, groundTruth)
+        setLastRunImagePreviewUrl(selectedFilePreviewUrl)
+        setResults(response)
+        setVideoResults(null)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Inference failed")
     } finally {
@@ -112,12 +136,12 @@ export function InferenceForm() {
     if (!file) {
       return
     }
-    if (!file.type.startsWith("image/")) {
-      setError("Please upload a valid image file.")
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+      setError("Please upload a valid image or video file.")
       return
     }
     setError(null)
-    if (selectedFilePreviewUrl) {
+    if (selectedFilePreviewUrl && selectedFilePreviewUrl !== lastRunImagePreviewUrl) {
       URL.revokeObjectURL(selectedFilePreviewUrl)
     }
     setSelectedFilePreviewUrl(URL.createObjectURL(file))
@@ -149,7 +173,7 @@ export function InferenceForm() {
             </div> */}
 
             <div className="space-y-2">
-              <Label>Choose or Drag & Drop Image</Label>
+              <Label>Choose or Drag & Drop Image/Video</Label>
               <div
                 className={`rounded-md border-2 border-dashed p-6 text-center transition-colors ${
                   isDragging ? "border-primary bg-primary/5" : "border-input"
@@ -165,25 +189,25 @@ export function InferenceForm() {
                   handleFileSelect(e.dataTransfer.files?.[0] ?? null)
                 }}
               >
-                <p className="text-sm text-muted-foreground">Drop image here, or select from disk</p>
+                <p className="text-sm text-muted-foreground">Drop image/video here, or select from disk</p>
                 <Input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   className="mt-3"
                   onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
                 />
                 {!selectedFile && (
-                  <p className="mt-3 text-xs text-amber-600">Please upload an image first to run inference.</p>
+                  <p className="mt-3 text-xs text-amber-600">Please upload an image or video first to run inference.</p>
                 )}
                 {selectedFile && (
                   <div className="mt-3 flex items-center justify-between rounded bg-muted px-3 py-2 text-xs">
-                    <span className="truncate">Selected: {selectedFile.name}</span>
+                    <span className="truncate">Selected: {selectedFile.name} ({selectedFile.type || "unknown"})</span>
                     <button
                       type="button"
                       className="text-destructive"
                       onClick={() => {
                         setSelectedFile(null)
-                        if (selectedFilePreviewUrl) {
+                        if (selectedFilePreviewUrl && selectedFilePreviewUrl !== lastRunImagePreviewUrl) {
                           URL.revokeObjectURL(selectedFilePreviewUrl)
                         }
                         setSelectedFilePreviewUrl(null)
@@ -229,10 +253,11 @@ export function InferenceForm() {
                 <Checkbox
                   id="include-gt"
                   checked={includeGroundTruth}
+                  disabled={selectedFile?.type.startsWith("video/")}
                   onChange={(e) => setIncludeGroundTruth(e.target.checked)}
                 />
                 <Label htmlFor="include-gt" className="font-normal cursor-pointer">
-                  Include Ground Truth (for evaluation metrics) (Not needed for images from the /annotated images folder)
+                  Include Ground Truth (for evaluation metrics) (disabled for video)
                 </Label>
               </div>
 
@@ -316,6 +341,7 @@ export function InferenceForm() {
       </Card>
 
       {results && <InferenceResults results={results} imagePreviewUrl={lastRunImagePreviewUrl} />}
+      {videoResults && <VideoInferenceResults results={videoResults} />}
     </div>
   )
 }
