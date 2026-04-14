@@ -78,10 +78,25 @@ For speed benchmarking:
 - Latency in milliseconds
 - FPS
 
+## Evaluation Input Requirements
+
+To compute evaluation metrics (accuracy, mAP50, precision, recall, F1), the system needs ground truth objects with:
+- label
+- bbox coordinates in xyxy format: [x1, y1, x2, y2]
+
+You can provide ground truth in two ways:
+- Image inference: send ground_truth in the request, or use a file that has matching annotations in annotated-data/labels.
+- Video inference: use a video that has a matching JSON annotation file in annotated-data/video_annotations.
+
+Quick test with pre-annotated data in this repo:
+- Images: pick files from annotated-data/images.
+- Videos: use annotated-data/video_annotations/test-vid.mp4 with annotated-data/video_annotations/test-vid.json.
+
 ## Ground Truth and Evaluation Notes
 
 Image GT:
 - Loaded from annotated-data/labels with class map from annotated-data/classes.txt.
+- Bounding boxes must be valid xyxy coordinates where x2 > x1 and y2 > y1.
 
 Video GT:
 - Loaded from annotated-data/video_annotations/<video_stem>.json.
@@ -117,6 +132,8 @@ Frontend runs at:
 
 1. Start backend and frontend.
 2. Upload an image or video from the UI.
+  - For pre-annotated image testing, choose files from annotated-data/images.
+  - For pre-annotated video testing, choose annotated-data/video_annotations/test-vid.mp4.
 3. Select YOLOv8n or RF-DETR.
 4. Run inference.
 5. Inspect:
